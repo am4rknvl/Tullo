@@ -29,7 +29,7 @@ var Migrations = []Migration{
 				updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 			);
 
-			CREATE INDEX idx_users_email ON users(email);
+			CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 		`,
 		Down: `
 			DROP TABLE IF EXISTS users;
@@ -46,7 +46,7 @@ var Migrations = []Migration{
 				updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 			);
 
-			CREATE INDEX idx_conversations_created_at ON conversations(created_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at DESC);
 		`,
 		Down: `
 			DROP TABLE IF EXISTS conversations;
@@ -64,8 +64,8 @@ var Migrations = []Migration{
 				UNIQUE(conversation_id, user_id)
 			);
 
-			CREATE INDEX idx_conversation_members_conversation ON conversation_members(conversation_id);
-			CREATE INDEX idx_conversation_members_user ON conversation_members(user_id);
+			CREATE INDEX IF NOT EXISTS idx_conversation_members_conversation ON conversation_members(conversation_id);
+			CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON conversation_members(user_id);
 		`,
 		Down: `
 			DROP TABLE IF EXISTS conversation_members;
@@ -83,8 +83,8 @@ var Migrations = []Migration{
 				updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 			);
 
-			CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at DESC);
-			CREATE INDEX idx_messages_sender ON messages(sender_id);
+			CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 		`,
 		Down: `
 			DROP TABLE IF EXISTS messages;
@@ -101,8 +101,8 @@ var Migrations = []Migration{
 				UNIQUE(message_id, user_id)
 			);
 
-			CREATE INDEX idx_message_reads_message ON message_reads(message_id);
-			CREATE INDEX idx_message_reads_user ON message_reads(user_id);
+			CREATE INDEX IF NOT EXISTS idx_message_reads_message ON message_reads(message_id);
+			CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id);
 		`,
 		Down: `
 			DROP TABLE IF EXISTS message_reads;

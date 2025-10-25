@@ -38,9 +38,12 @@ func main() {
 	// Connect to Redis
 	redis, err := cache.NewRedisClient(cfg.GetRedisAddr(), cfg.Redis.Password, cfg.Redis.DB)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		log.Printf("Warning: Failed to connect to Redis: %v", err)
+		log.Println("Running without Redis - real-time features will be limited")
+		redis = nil
+	} else {
+		defer redis.Close()
 	}
-	defer redis.Close()
 
 	// Initialize services
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.ExpiryHours)
@@ -55,11 +58,14 @@ func main() {
 	convHandler := handlers.NewConversationHandler(convRepo, userRepo, msgRepo)
 	msgHandler := handlers.NewMessageHandler(msgRepo, convRepo, redis)
 
-	// Initialize WebSocket hub
-	hub := websocket.NewHub(redis)
-	go hub.Run()
-
-	wsHandler := websocket.NewHandler(hub, jwtService, msgRepo, convRepo, redis)
+	// Initialize WebSocket hub (only if Redis is available)
+	var hub *websocket.Hub
+	var wsHandler *websocket.Handler
+	if redis != nil {
+		hub = websocket.NewHub(redis)
+		go hub.Run()
+		wsHandler = websocket.NewHandler(hub, jwtService, msgRepo, convRepo, redis)
+	}
 
 	// Initialize rate limiter
 	rateLimiter := middleware.NewRateLimiter(cfg.API.RateLimitMessagesPerSec)
@@ -87,8 +93,10 @@ func main() {
 		authRoutes.POST("/login", authHandler.Login)
 	}
 
-	// WebSocket endpoint
-	router.GET("/ws", wsHandler.HandleWebSocket)
+	// WebSocket endpoint (only if Redis is available)
+	if wsHandler != nil {
+		router.GET("/ws", wsHandler.HandleWebSocket)
+	}
 
 	// Protected routes
 	api := router.Group("/api/v1")
@@ -109,8 +117,10 @@ func main() {
 		api.POST("/messages", middleware.RateLimitMiddleware(rateLimiter), msgHandler.SendMessage)
 		api.PUT("/messages/:id/read", msgHandler.MarkMessageAsRead)
 
-		// WebSocket info
-		api.GET("/online-users", wsHandler.GetOnlineUsers)
+		// WebSocket info (only if Redis is available)
+		if wsHandler != nil {
+			api.GET("/online-users", wsHandler.GetOnlineUsers)
+		}
 	}
 
 	// Start server

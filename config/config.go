@@ -56,7 +56,10 @@ type CORSConfig struct {
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (ignore error in production)
+	// Try current directory first, then parent directories
 	_ = godotenv.Load()
+	_ = godotenv.Load("../../.env")
+	_ = godotenv.Load("../.env")
 
 	redisDB, err := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	if err != nil {
