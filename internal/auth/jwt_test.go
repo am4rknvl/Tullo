@@ -12,8 +12,8 @@ func TestJWTService_GenerateToken(t *testing.T) {
 	expiryHours := 24
 	service := NewJWTService(secret, expiryHours)
 
-	userID := uuid.New().String()
-	token, err := service.GenerateToken(userID)
+	userID := uuid.New()
+	token, err := service.GenerateToken(userID, "test@example.com")
 
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
@@ -29,8 +29,8 @@ func TestJWTService_ValidateToken(t *testing.T) {
 	expiryHours := 24
 	service := NewJWTService(secret, expiryHours)
 
-	userID := uuid.New().String()
-	token, err := service.GenerateToken(userID)
+	userID := uuid.New()
+	token, err := service.GenerateToken(userID, "test@example.com")
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestJWTService_ValidateToken(t *testing.T) {
 	}
 
 	if claims.UserID != userID {
-		t.Errorf("Expected userID %s, got %s", userID, claims.UserID)
+		t.Errorf("Expected userID %s, got %s", userID.String(), claims.UserID.String())
 	}
 }
 
@@ -63,8 +63,8 @@ func TestJWTService_ValidateToken_Expired(t *testing.T) {
 	expiryHours := -1 // Expired token
 	service := NewJWTService(secret, expiryHours)
 
-	userID := uuid.New().String()
-	token, err := service.GenerateToken(userID)
+	userID := uuid.New()
+	token, err := service.GenerateToken(userID, "test@example.com")
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}

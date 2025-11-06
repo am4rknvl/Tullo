@@ -64,7 +64,7 @@ func main() {
 	if redis != nil {
 		hub = websocket.NewHub(redis)
 		go hub.Run()
-		wsHandler = websocket.NewHandler(hub, jwtService, msgRepo, convRepo, redis)
+		wsHandler = websocket.NewHandler(hub, jwtService, msgRepo, convRepo, redis, cfg.CORS.AllowedOrigins)
 	}
 
 	// Initialize rate limiter

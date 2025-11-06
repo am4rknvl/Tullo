@@ -23,11 +23,12 @@ var upgrader = websocket.Upgrader{
 
 // Handler handles WebSocket connections
 type Handler struct {
-	hub        *Hub
-	jwtService *auth.JWTService
-	msgRepo    *repository.MessageRepository
-	convRepo   *repository.ConversationRepository
-	redis      *cache.RedisClient
+	hub            *Hub
+	jwtService     *auth.JWTService
+	msgRepo        *repository.MessageRepository
+	convRepo       *repository.ConversationRepository
+	redis          *cache.RedisClient
+	allowedOrigins []string
 }
 
 // NewHandler creates a new WebSocket handler
@@ -37,13 +38,16 @@ func NewHandler(
 	msgRepo *repository.MessageRepository,
 	convRepo *repository.ConversationRepository,
 	redis *cache.RedisClient,
+	allowedOrigins []string,
 ) *Handler {
+	// If allowedOrigins is empty, default to allow localhost origins used in development
 	return &Handler{
-		hub:        hub,
-		jwtService: jwtService,
-		msgRepo:    msgRepo,
-		convRepo:   convRepo,
-		redis:      redis,
+		hub:            hub,
+		jwtService:     jwtService,
+		msgRepo:        msgRepo,
+		convRepo:       convRepo,
+		redis:          redis,
+		allowedOrigins: allowedOrigins,
 	}
 }
 
@@ -61,6 +65,22 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 		return
+	}
+
+	// Validate origin using configured allowed origins if provided
+	if len(h.allowedOrigins) > 0 {
+		upgrader.CheckOrigin = func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return false
+			}
+			for _, o := range h.allowedOrigins {
+				if o == origin {
+					return true
+				}
+			}
+			return false
+		}
 	}
 
 	// Upgrade connection

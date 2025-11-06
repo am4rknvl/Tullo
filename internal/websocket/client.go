@@ -39,6 +39,11 @@ type Client struct {
 	msgRepo  *repository.MessageRepository
 	convRepo *repository.ConversationRepository
 	redis    *cache.RedisClient
+	// simple token-bucket rate limiter
+	tokens       int
+	maxTokens    int
+	refillPeriod time.Duration
+	lastRefill   time.Time
 }
 
 // NewClient creates a new WebSocket client
@@ -52,15 +57,19 @@ func NewClient(
 	redis *cache.RedisClient,
 ) *Client {
 	return &Client{
-		hub:         hub,
-		conn:        conn,
-		send:        make(chan []byte, 256),
-		userID:      userID,
-		email:       email,
-		connectedAt: time.Now(),
-		msgRepo:     msgRepo,
-		convRepo:    convRepo,
-		redis:       redis,
+		hub:          hub,
+		conn:         conn,
+		send:         make(chan []byte, 256),
+		userID:       userID,
+		email:        email,
+		connectedAt:  time.Now(),
+		msgRepo:      msgRepo,
+		convRepo:     convRepo,
+		redis:        redis,
+		tokens:       20,
+		maxTokens:    20,
+		refillPeriod: time.Second,
+		lastRefill:   time.Now(),
 	}
 }
 
@@ -86,6 +95,26 @@ func (c *Client) ReadPump() {
 			}
 			break
 		}
+
+		// Rate limit: simple token bucket (in-memory). If Redis present, you may implement a global limiter.
+		now := time.Now()
+		elapsed := now.Sub(c.lastRefill)
+		if elapsed >= c.refillPeriod {
+			// add tokens proportional to elapsed seconds
+			add := int(elapsed / c.refillPeriod)
+			c.tokens += add
+			if c.tokens > c.maxTokens {
+				c.tokens = c.maxTokens
+			}
+			c.lastRefill = now
+		}
+
+		if c.tokens <= 0 {
+			// drop the message and optionally send a rate limit error
+			c.sendError("rate_limited")
+			continue
+		}
+		c.tokens--
 
 		// Handle incoming message
 		c.handleMessage(message)

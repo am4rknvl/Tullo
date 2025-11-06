@@ -1,19 +1,38 @@
 package models
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type User struct {
-	ID          uuid.UUID  `json:"id" db:"id"`
-	Email       string     `json:"email" db:"email"`
-	DisplayName string     `json:"display_name" db:"display_name"`
-	AvatarURL   *string    `json:"avatar_url,omitempty" db:"avatar_url"`
+	ID           uuid.UUID `json:"id" db:"id"`
+	Email        string    `json:"email" db:"email"`
+	DisplayName  string    `json:"display_name" db:"display_name"`
+	AvatarURL    *string   `json:"avatar_url,omitempty" db:"avatar_url"`
 	PasswordHash string    `json:"-" db:"password_hash"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// Validate checks basic user fields
+func (u *User) Validate() error {
+	if u.Email == "" {
+		return fmt.Errorf("email is required")
+	}
+	if !strings.Contains(u.Email, "@") {
+		return fmt.Errorf("invalid email")
+	}
+	if u.DisplayName == "" {
+		return fmt.Errorf("display name is required")
+	}
+	if len(u.DisplayName) < 2 || len(u.DisplayName) > 100 {
+		return fmt.Errorf("display name length invalid")
+	}
+	return nil
 }
 
 type UserPresence struct {

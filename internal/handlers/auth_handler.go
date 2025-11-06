@@ -27,14 +27,14 @@ func NewAuthHandler(userRepo *repository.UserRepository, jwtService *auth.JWTSer
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Hash password
 	hashedPassword, err := auth.HashPassword(req.Password)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		ErrorResponse(c, http.StatusInternalServerError, "Failed to hash password")
 		return
 	}
 
@@ -50,14 +50,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	if err := h.userRepo.Create(user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		ErrorResponse(c, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
 	// Generate token
 	token, err := h.jwtService.GenerateToken(user.ID, user.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		ErrorResponse(c, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
@@ -71,27 +71,27 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req models.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get user by email
 	user, err := h.userRepo.GetByEmail(req.Email)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		ErrorResponse(c, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	// Check password
-	if err := auth.CheckPassword(req.Password, user.PasswordHash); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+	if err := auth.CheckPassword(user.PasswordHash, req.Password); err != nil {
+		ErrorResponse(c, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	// Generate token
 	token, err := h.jwtService.GenerateToken(user.ID, user.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		ErrorResponse(c, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 
 	user, err := h.userRepo.GetByID(uid)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		ErrorResponse(c, http.StatusNotFound, "User not found")
 		return
 	}
 
