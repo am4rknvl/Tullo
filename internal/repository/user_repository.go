@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tullo/backend/internal/database"
@@ -182,4 +183,24 @@ func (r *UserRepository) Delete(id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// EnsureSystemUser creates or returns a system user by email (used for TulloBot)
+func (r *UserRepository) EnsureSystemUser(email, displayName string) (*models.User, error) {
+	u, err := r.GetByEmail(email)
+	if err == nil {
+		return u, nil
+	}
+	// create a system user with no password and fixed display name
+	user := &models.User{
+		ID:          uuid.New(),
+		Email:       email,
+		DisplayName: displayName,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := r.Create(user); err != nil {
+		return nil, err
+	}
+	return user, nil
 }

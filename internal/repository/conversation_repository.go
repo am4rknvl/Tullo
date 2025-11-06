@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/tullo/backend/internal/database"
 	"github.com/tullo/backend/internal/models"
@@ -282,4 +284,98 @@ func (r *ConversationRepository) GetOrCreateDirectConversation(user1ID, user2ID 
 	}
 
 	return r.GetByID(conversation.ID)
+}
+
+// GetMemberRole returns the role of a member in a conversation (e.g., 'admin','moderator','member')
+func (r *ConversationRepository) GetMemberRole(conversationID, userID uuid.UUID) (string, error) {
+	query := `
+		SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2 LIMIT 1
+	`
+	var role string
+	err := r.db.QueryRow(query, conversationID, userID).Scan(&role)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get member role: %w", err)
+	}
+	return role, nil
+}
+
+// AddModeration adds a moderation entry (mute/ban) for a user in a conversation
+func (r *ConversationRepository) AddModeration(conversationID, userID uuid.UUID, action string, expiresAt *time.Time, reason string) error {
+	query := `
+		INSERT INTO conversation_moderations (id, conversation_id, user_id, action, expires_at, reason, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (conversation_id, user_id, action) DO UPDATE SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason, created_at = NOW()
+	`
+	_, err := r.db.Exec(query, uuid.New(), conversationID, userID, action, expiresAt, reason)
+	if err != nil {
+		return fmt.Errorf("failed to add moderation: %w", err)
+	}
+	return nil
+}
+
+// RemoveModeration removes a moderation entry
+func (r *ConversationRepository) RemoveModeration(conversationID, userID uuid.UUID, action string) error {
+	query := `DELETE FROM conversation_moderations WHERE conversation_id = $1 AND user_id = $2 AND action = $3`
+	_, err := r.db.Exec(query, conversationID, userID, action)
+	if err != nil {
+		return fmt.Errorf("failed to remove moderation: %w", err)
+	}
+	return nil
+}
+
+// IsUserMutedOrBanned checks if a user is currently muted or banned in a conversation
+func (r *ConversationRepository) IsUserMutedOrBanned(conversationID, userID uuid.UUID) (muted bool, banned bool, err error) {
+	query := `
+		SELECT action, expires_at FROM conversation_moderations
+		WHERE conversation_id = $1 AND user_id = $2
+	`
+	rows, err := r.db.Query(query, conversationID, userID)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to check moderation: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	for rows.Next() {
+		var action string
+		var expiresAt sql.NullTime
+		if err := rows.Scan(&action, &expiresAt); err != nil {
+			return false, false, fmt.Errorf("failed to scan moderation: %w", err)
+		}
+		if expiresAt.Valid && expiresAt.Time.Before(now) {
+			// expired; skip
+			continue
+		}
+		if action == "mute" {
+			muted = true
+		}
+		if action == "ban" {
+			banned = true
+		}
+	}
+
+	return muted, banned, nil
+}
+
+// UpdateMemberRole sets role for an existing member or inserts the member with given role
+func (r *ConversationRepository) UpdateMemberRole(conversationID, userID uuid.UUID, role string) error {
+	// try update
+	res, err := r.db.Exec(`UPDATE conversation_members SET role = $1 WHERE conversation_id = $2 AND user_id = $3`, role, conversationID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update member role: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows > 0 {
+		return nil
+	}
+
+	// insert if not exists
+	_, err = r.db.Exec(`INSERT INTO conversation_members (id, conversation_id, user_id, role, joined_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT DO NOTHING`, uuid.New(), conversationID, userID, role)
+	if err != nil {
+		return fmt.Errorf("failed to insert member role: %w", err)
+	}
+	return nil
 }

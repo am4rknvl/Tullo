@@ -3,6 +3,8 @@ package websocket
 import (
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -74,15 +76,15 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 			if origin == "" {
 				return false
 			}
-			for _, o := range h.allowedOrigins {
-				if o == origin {
+			// allow exact match or wildcard like *.example.com
+			for _, pattern := range h.allowedOrigins {
+				if matchOrigin(pattern, origin) {
 					return true
 				}
 			}
 			return false
 		}
 	}
-
 	// Upgrade connection
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -124,4 +126,26 @@ func (h *Handler) GetOnlineUsers(c *gin.Context) {
 		"online_users": onlineUsers,
 		"count":        len(onlineUsers),
 	})
+}
+
+// matchOrigin supports exact matches or wildcard patterns like *.example.com
+func matchOrigin(pattern, origin string) bool {
+	if pattern == origin {
+		return true
+	}
+	// simple wildcard support: pattern starts with *.
+	if strings.HasPrefix(pattern, "*.") {
+		// strip scheme from origin if present
+		// e.g., https://sub.example.com -> sub.example.com
+		originHost := origin
+		if u, err := url.Parse(origin); err == nil {
+			originHost = u.Hostname()
+		}
+		patHost := strings.TrimPrefix(pattern, "*.")
+		// ensure originHost ends with patHost
+		if strings.HasSuffix(originHost, patHost) {
+			return true
+		}
+	}
+	return false
 }

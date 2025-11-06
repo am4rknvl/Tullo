@@ -45,7 +45,7 @@ type JWTConfig struct {
 }
 
 type APIConfig struct {
-	KeyHeader              string
+	KeyHeader               string
 	RateLimitMessagesPerSec int
 }
 
@@ -86,8 +86,8 @@ func Load() (*Config, error) {
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnv("DB_PORT", "5432"),
-			User:     getEnv("DB_USER", "tullo"),
-			Password: getEnv("DB_PASSWORD", "tullo_password"),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", "thismaybejpegmafia"),
 			DBName:   getEnv("DB_NAME", "tullo_db"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
@@ -102,7 +102,7 @@ func Load() (*Config, error) {
 			ExpiryHours: jwtExpiry,
 		},
 		API: APIConfig{
-			KeyHeader:              getEnv("API_KEY_HEADER", "X-API-Key"),
+			KeyHeader:               getEnv("API_KEY_HEADER", "X-API-Key"),
 			RateLimitMessagesPerSec: rateLimit,
 		},
 		CORS: CORSConfig{

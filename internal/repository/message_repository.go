@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tullo/backend/internal/database"
@@ -121,6 +122,97 @@ func (r *MessageRepository) GetByConversationID(conversationID uuid.UUID, limit,
 
 		msg.Sender = &sender
 		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// GetByConversationIDCursor retrieves messages for a conversation using cursor (before/after timestamps)
+func (r *MessageRepository) GetByConversationIDCursor(conversationID uuid.UUID, limit int, before, after *time.Time) ([]models.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if before != nil {
+		query = `
+		SELECT m.id, m.conversation_id, m.sender_id, m.body, m.created_at, m.updated_at,
+			   u.id, u.email, u.display_name, u.avatar_url, u.password_hash, u.created_at, u.updated_at
+		FROM messages m
+		INNER JOIN users u ON m.sender_id = u.id
+		WHERE m.conversation_id = $1 AND m.created_at < $2
+		ORDER BY m.created_at DESC
+		LIMIT $3
+		`
+		rows, err = r.db.Query(query, conversationID, *before, limit)
+	} else if after != nil {
+		query = `
+		SELECT m.id, m.conversation_id, m.sender_id, m.body, m.created_at, m.updated_at,
+			   u.id, u.email, u.display_name, u.avatar_url, u.password_hash, u.created_at, u.updated_at
+		FROM messages m
+		INNER JOIN users u ON m.sender_id = u.id
+		WHERE m.conversation_id = $1 AND m.created_at > $2
+		ORDER BY m.created_at ASC
+		LIMIT $3
+		`
+		rows, err = r.db.Query(query, conversationID, *after, limit)
+	} else {
+		query = `
+		SELECT m.id, m.conversation_id, m.sender_id, m.body, m.created_at, m.updated_at,
+			   u.id, u.email, u.display_name, u.avatar_url, u.password_hash, u.created_at, u.updated_at
+		FROM messages m
+		INNER JOIN users u ON m.sender_id = u.id
+		WHERE m.conversation_id = $1
+		ORDER BY m.created_at DESC
+		LIMIT $2
+		`
+		rows, err = r.db.Query(query, conversationID, limit)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", err)
+	}
+	defer rows.Close()
+
+	messages := []models.Message{}
+	for rows.Next() {
+		var msg models.Message
+		var sender models.User
+
+		err := rows.Scan(
+			&msg.ID,
+			&msg.ConversationID,
+			&msg.SenderID,
+			&msg.Body,
+			&msg.CreatedAt,
+			&msg.UpdatedAt,
+			&sender.ID,
+			&sender.Email,
+			&sender.DisplayName,
+			&sender.AvatarURL,
+			&sender.PasswordHash,
+			&sender.CreatedAt,
+			&sender.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan message: %w", err)
+		}
+
+		msg.Sender = &sender
+		messages = append(messages, msg)
+	}
+
+	// if we fetched with after (ascending), reverse to return newest-first (desc)
+	if after != nil {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
 	}
 
 	return messages, nil

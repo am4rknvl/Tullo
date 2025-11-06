@@ -186,3 +186,48 @@ func (r *RedisClient) SubscribeToTyping() *redis.PubSub {
 func (r *RedisClient) GetClient() *redis.Client {
 	return r.client
 }
+
+// AllowAction implements a Redis-backed token-bucket limiter per key (user+action).
+// Returns true if the action is allowed, false if rate-limited.
+func (r *RedisClient) AllowAction(userID uuid.UUID, action string, rate int, burst int) (bool, error) {
+	key := fmt.Sprintf("rl:%s:%s", action, userID.String())
+	// Lua script: manage tokens and last timestamp
+	script := `
+local key = KEYS[1]
+local rate = tonumber(ARGV[1])
+local burst = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local vals = redis.call('HMGET', key, 'tokens', 'last')
+local tokens = tonumber(vals[1])
+local last = tonumber(vals[2])
+if tokens == nil then tokens = burst end
+if last == nil then last = now end
+local delta = math.max(0, now - last)
+local new_tokens = math.min(burst, tokens + (delta * rate / 1000))
+if new_tokens >= 1 then
+	new_tokens = new_tokens - 1
+	redis.call('HMSET', key, 'tokens', new_tokens, 'last', now)
+	redis.call('PEXPIRE', key, 60000)
+	return 1
+else
+	redis.call('HMSET', key, 'tokens', new_tokens, 'last', now)
+	redis.call('PEXPIRE', key, 60000)
+	return 0
+end
+`
+
+	now := time.Now().UnixNano() / int64(time.Millisecond)
+	res, err := r.client.Eval(r.ctx, script, []string{key}, rate, burst, now).Result()
+	if err != nil {
+		return false, err
+	}
+	// Eval returns int64 (1 or 0)
+	switch v := res.(type) {
+	case int64:
+		return v == 1, nil
+	case int:
+		return v == 1, nil
+	default:
+		return false, fmt.Errorf("unexpected result from rate limiter: %T %v", res, res)
+	}
+}

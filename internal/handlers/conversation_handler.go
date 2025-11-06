@@ -241,3 +241,82 @@ func (h *ConversationHandler) RemoveMember(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Member removed successfully"})
 }
+
+// AddModeration mutes or bans a user in a conversation (admin/moderator only)
+func (h *ConversationHandler) AddModeration(c *gin.Context) {
+	conversationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	var req struct {
+		UserID      uuid.UUID `json:"user_id"`
+		Action      string    `json:"action"` // "mute" or "ban"
+		DurationMin int       `json:"duration_min"`
+		Reason      string    `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	uid := userID.(uuid.UUID)
+
+	// Check requester role
+	role, err := h.convRepo.GetMemberRole(conversationID, uid)
+	if err != nil || (role != "admin" && role != "moderator") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var expires *time.Time
+	if req.DurationMin > 0 {
+		t := time.Now().Add(time.Duration(req.DurationMin) * time.Minute)
+		expires = &t
+	}
+
+	if err := h.convRepo.AddModeration(conversationID, req.UserID, req.Action, expires, req.Reason); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add moderation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "moderation added"})
+}
+
+// RemoveModeration removes a moderation entry (admin/moderator only)
+func (h *ConversationHandler) RemoveModeration(c *gin.Context) {
+	conversationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	memberID, err := uuid.Parse(c.Param("user_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	action := c.Query("action") // expect "mute" or "ban"
+	if action == "" {
+		action = "mute"
+	}
+
+	userID, _ := c.Get("user_id")
+	uid := userID.(uuid.UUID)
+
+	role, err := h.convRepo.GetMemberRole(conversationID, uid)
+	if err != nil || (role != "admin" && role != "moderator") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if err := h.convRepo.RemoveModeration(conversationID, memberID, action); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove moderation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "moderation removed"})
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tullo/backend/internal/cache"
 	"github.com/tullo/backend/internal/models"
+	"github.com/tullo/backend/internal/repository"
 )
 
 // Hub maintains the set of active clients and broadcasts messages to clients
@@ -27,18 +28,22 @@ type Hub struct {
 	// Redis client for pub/sub
 	redis *cache.RedisClient
 
+	// Conversation repository to resolve members for conversation-scoped broadcasts
+	convRepo *repository.ConversationRepository
+
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
 }
 
 // NewHub creates a new Hub
-func NewHub(redis *cache.RedisClient) *Hub {
+func NewHub(redis *cache.RedisClient, convRepo *repository.ConversationRepository) *Hub {
 	return &Hub{
 		clients:    make(map[uuid.UUID]*Client),
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		redis:      redis,
+		convRepo:   convRepo,
 	}
 }
 
@@ -126,7 +131,31 @@ func (h *Hub) subscribeToRedis() {
 	for {
 		select {
 		case msg := <-msgChan:
-			// Broadcast message to all connected clients
+			// Try to unmarshal into WSMessage and handle conversation-scoped delivery
+			var wsMsg models.WSMessage
+			if err := json.Unmarshal([]byte(msg.Payload), &wsMsg); err == nil {
+				// If it's a message event with a Message payload, attempt scoped delivery
+				if wsMsg.Event == models.EventMessageNew {
+					// payload may be a nested object; marshal/unmarshal to Message
+					raw, _ := json.Marshal(wsMsg.Payload)
+					var m models.Message
+					if err := json.Unmarshal(raw, &m); err == nil {
+						// resolve members for conversation
+						members, err := h.convRepo.GetMembers(m.ConversationID)
+						if err == nil {
+							ids := make([]uuid.UUID, 0, len(members))
+							for _, u := range members {
+								ids = append(ids, u.ID)
+							}
+							// send to only conversation members
+							h.SendToConversation(ids, wsMsg)
+							continue
+						}
+					}
+				}
+			}
+
+			// fallback: broadcast raw message to everyone
 			h.broadcast <- []byte(msg.Payload)
 
 		case presence := <-presenceChan:

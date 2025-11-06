@@ -10,6 +10,7 @@ import (
 	"github.com/tullo/backend/internal/database"
 	"github.com/tullo/backend/internal/handlers"
 	"github.com/tullo/backend/internal/middleware"
+	"github.com/tullo/backend/internal/moderator"
 	"github.com/tullo/backend/internal/repository"
 	"github.com/tullo/backend/internal/websocket"
 )
@@ -49,6 +50,7 @@ func main() {
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.ExpiryHours)
 
 	// Initialize repositories
+	modRepo := repository.NewModerationRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	convRepo := repository.NewConversationRepository(db)
 	msgRepo := repository.NewMessageRepository(db)
@@ -58,12 +60,28 @@ func main() {
 	convHandler := handlers.NewConversationHandler(convRepo, userRepo, msgRepo)
 	msgHandler := handlers.NewMessageHandler(msgRepo, convRepo, redis)
 
+	// Channel & stream repositories and handlers
+	chRepo := repository.NewChannelRepository(db)
+	streamRepo := repository.NewStreamRepository(db)
+	channelHandler := handlers.NewChannelHandler(chRepo, streamRepo, convRepo, userRepo, modRepo)
+	// configure local fallback rate/burst using env via config (burst default 10)
+	channelChatHandler := handlers.NewChannelChatHandler(chRepo, convRepo, msgRepo, redis, float64(cfg.API.RateLimitMessagesPerSec), 10)
+
 	// Initialize WebSocket hub (only if Redis is available)
 	var hub *websocket.Hub
 	var wsHandler *websocket.Handler
 	if redis != nil {
-		hub = websocket.NewHub(redis)
+		hub = websocket.NewHub(redis, convRepo)
 		go hub.Run()
+		// Ensure TulloBot system user exists
+		botUser, err := userRepo.EnsureSystemUser("tullo-bot@tullo.local", "TulloBot")
+		if err != nil {
+			log.Printf("Warning: failed to ensure TulloBot user: %v", err)
+		}
+
+		// Start moderation bot
+		bot := moderator.NewBot(redis, convRepo, msgRepo, modRepo, userRepo, botUser.ID)
+		go bot.Run()
 		wsHandler = websocket.NewHandler(hub, jwtService, msgRepo, convRepo, redis, cfg.CORS.AllowedOrigins)
 	}
 
@@ -111,6 +129,9 @@ func main() {
 		api.GET("/conversations/:id", convHandler.GetConversation)
 		api.POST("/conversations/:id/members", convHandler.AddMembers)
 		api.DELETE("/conversations/:id/members/:user_id", convHandler.RemoveMember)
+		// Moderation endpoints
+		api.POST("/conversations/:id/moderation", convHandler.AddModeration)
+		api.DELETE("/conversations/:id/moderation/:user_id", convHandler.RemoveModeration)
 
 		// Message routes
 		api.GET("/messages", msgHandler.GetMessages)
@@ -121,6 +142,25 @@ func main() {
 		if wsHandler != nil {
 			api.GET("/online-users", wsHandler.GetOnlineUsers)
 		}
+
+		// Channel routes
+		api.POST("/channels", channelHandler.CreateChannel)
+		api.GET("/channels/:slug", channelHandler.GetChannel)
+		api.POST("/channels/:slug/start", channelHandler.StartStream)
+		api.POST("/channels/:slug/end", channelHandler.EndStream)
+		api.GET("/streams", channelHandler.GetActiveStreams)
+		api.POST("/channels/:slug/follow", channelHandler.FollowChannel)
+		api.DELETE("/channels/:slug/unfollow", channelHandler.UnfollowChannel)
+		// channel-level moderator management
+		api.POST("/channels/:slug/mods", channelHandler.AssignModerator)
+		api.DELETE("/channels/:slug/mods/:user_id", channelHandler.RemoveModerator)
+		// ban/unban
+		api.POST("/channels/:slug/ban/:user_id", channelHandler.BanUser)
+		api.DELETE("/channels/:slug/unban/:user_id", channelHandler.UnbanUser)
+
+		// Channel chat routes
+		api.GET("/channels/:slug/chat", channelChatHandler.GetChat)
+		api.POST("/channels/:slug/chat", middleware.RateLimitMiddleware(rateLimiter), channelChatHandler.PostChat)
 	}
 
 	// Start server
